@@ -1,6 +1,7 @@
 wasi-sdk-25.0-arm64-macos
-mitdgc-log-sample.lcm
+*.lcm
 *.o
 *.wasm
 node_modules
 dist
+.DS_Store

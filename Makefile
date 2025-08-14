@@ -39,7 +39,7 @@ objects:=\
 	build/foxglove/Vector3.pb-c.o \
     build/google/timestamp.pb-c.o
 
-all: lcm-loader/data-loader.wasm
+all: lcm-loader/data-loader.wasm mitdgc-log-sample.lcm
 
 .PHONY: builddir
 builddir:
@@ -49,6 +49,9 @@ builddir:
 
 lcm-loader/data-loader.wasm: $(srcs) $(objects)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm -Llib -lprotobuf-c -Isrc
+
+mitdgc-log-sample.lcm:
+	curl -o $@ https://grandchallenge.mit.edu/public/mitdgc-log-sample
 
 build/lcm/%.o: src/lcm/%.c | builddir
 	$(CC) -g -c -Wall $(CFLAGS) -o $@ $<  -Isrc
