@@ -5,9 +5,7 @@
 #include "lcm/velodyne.h"
 #include "lcm/lcmtypes_image_t.h"
 
-#include "foxglove/PointCloud.pb-c.h"
-#include "foxglove/LaserScan.pb-c.h"
-#include "foxglove/CompressedImage.pb-c.h"
+#include <foxglove/schemas.hpp>
 
 Transcoder::Transcoder()
 {
@@ -19,47 +17,35 @@ Transcoder::~Transcoder()
     free(velodyne_calibration);
 }
 
+template <typename T>
+foxglove::FoxgloveError encode_to_vec(T &msg, std::vector<uint8_t> *out)
+{
+    size_t encoded_len = 0;
+    foxglove::FoxgloveError error = msg.encode(out->data(), out->size(), &encoded_len);
+    out->resize(encoded_len);
+    if (error == foxglove::FoxgloveError::BufferTooShort)
+    {
+        error = msg.encode(out->data(), out->size(), &encoded_len);
+    }
+    return error;
+}
+
 int32_t Transcoder::transcode_point_cloud(const std::vector<uint8_t> &in, std::vector<uint8_t> *out, const char *frame_id)
 {
-    Foxglove__PointCloud pc;
-    foxglove__point_cloud__init(&pc);
-    Foxglove__PackedElementField x, y, z, intensity;
-    foxglove__packed_element_field__init(&x);
-    x.name = (char *)"x";
-    x.offset = 0;
-    x.type = FOXGLOVE__PACKED_ELEMENT_FIELD__NUMERIC_TYPE__FLOAT64;
-    foxglove__packed_element_field__init(&y);
-    y.name = (char *)"y";
-    y.offset = 8;
-    y.type = FOXGLOVE__PACKED_ELEMENT_FIELD__NUMERIC_TYPE__FLOAT64;
-    foxglove__packed_element_field__init(&z);
-    z.name = (char *)"z";
-    z.offset = 16;
-    z.type = FOXGLOVE__PACKED_ELEMENT_FIELD__NUMERIC_TYPE__FLOAT64;
-    foxglove__packed_element_field__init(&intensity);
-    intensity.name = (char *)"intensity";
-    intensity.offset = 24;
-    intensity.type = FOXGLOVE__PACKED_ELEMENT_FIELD__NUMERIC_TYPE__FLOAT64;
-    pc.n_fields = 4;
-    Foxglove__PackedElementField *field_ptrs[] = {&x, &y, &z, &intensity};
-    pc.fields = field_ptrs;
-
-    pc.frame_id = (char *)frame_id;
-    pc.point_stride = 32;
-    Foxglove__Pose pose;
-    foxglove__pose__init(&pose);
-    Foxglove__Quaternion orientation;
-    foxglove__quaternion__init(&orientation);
-    orientation.w = 1;
-    Foxglove__Vector3 position;
-    foxglove__vector3__init(&position);
-    pose.orientation = &orientation;
-    pose.position = &position;
-    pc.pose = &pose;
-    std::vector<uint8_t> data;
+    foxglove::schemas::PointCloud pointcloud;
+    pointcloud.fields.push_back(foxglove::schemas::PackedElementField{.name = "x", .offset = 0, .type = foxglove::schemas::PackedElementField::NumericType::FLOAT64});
+    pointcloud.fields.push_back(foxglove::schemas::PackedElementField{.name = "y", .offset = 8, .type = foxglove::schemas::PackedElementField::NumericType::FLOAT64});
+    pointcloud.fields.push_back(foxglove::schemas::PackedElementField{.name = "z", .offset = 16, .type = foxglove::schemas::PackedElementField::NumericType::FLOAT64});
+    pointcloud.fields.push_back(foxglove::schemas::PackedElementField{.name = "intensity", .offset = 24, .type = foxglove::schemas::PackedElementField::NumericType::FLOAT64});
+    pointcloud.frame_id = frame_id;
+    pointcloud.point_stride = 32;
+    pointcloud.pose = foxglove::schemas::Pose{
+        .orientation = foxglove::schemas::Quaternion{.w = 1},
+    };
 
     lcmtypes_velodyne_t vel;
     lcmtypes_velodyne_t_decode(in.data(), 0, in.size(), &vel);
+    pointcloud.timestamp.emplace(foxglove::schemas::Timestamp{.sec = uint32_t(vel.utime) / 1000000, .nsec = (uint32_t(vel.utime) % 1000000) * 1000});
     // parse the velodyne data packet
     velodyne_decoder_t vdecoder;
     velodyne_decoder_init(velodyne_calibration, &vdecoder, vel.data, vel.datalen);
@@ -71,16 +57,12 @@ int32_t Transcoder::transcode_point_cloud(const std::vector<uint8_t> &in, std::v
         {
             continue;
         }
-        uint8_t bytes[sizeof(double) * 3];
-        std::memcpy(bytes, &vsample.xyz, sizeof(double) * 3);
-        data.insert(data.end(), bytes, bytes + (sizeof(double) * 3));
+        constexpr size_t size = sizeof(double) * 3;
+        std::byte bytes[size];
+        std::memcpy(bytes, &vsample.xyz, size);
+        pointcloud.data.insert(pointcloud.data.end(), bytes, bytes + size);
     }
-    pc.data.data = data.data();
-    pc.data.len = data.size();
-
-    size_t packed_size = foxglove__point_cloud__get_packed_size(&pc);
-    out->resize(packed_size);
-    foxglove__point_cloud__pack(&pc, out->data());
+    encode_to_vec(pointcloud, out);
     lcmtypes_velodyne_t_decode_cleanup(&vel);
     return 0;
 }
@@ -89,28 +71,12 @@ int32_t Transcoder::transcode_laser_scan(const std::vector<uint8_t> &in, std::ve
 {
     lcmtypes_laser_t msg;
     lcmtypes_laser_t_decode(in.data(), 0, in.size(), &msg);
-    Foxglove__LaserScan scan;
-    foxglove__laser_scan__init(&scan);
-    Google__Protobuf__Timestamp timestamp;
-    google__protobuf__timestamp__init(&timestamp);
-    uint64_t all_nanos = msg.utime * 1000;
-    timestamp.nanos = all_nanos % 1000000000;
-    timestamp.seconds = all_nanos / 1000000000;
-    scan.timestamp = &timestamp;
-    scan.frame_id = (char *)frame_id;
-    Foxglove__Pose pose;
-    foxglove__pose__init(&pose);
-    Foxglove__Quaternion orientation;
-    foxglove__quaternion__init(&orientation);
-    orientation.w = 1;
-    Foxglove__Vector3 position;
-    foxglove__vector3__init(&position);
-    position.x = 0;
-    position.y = 0;
-    position.z = 0;
-    pose.position = &position;
-    pose.orientation = &orientation;
-    scan.pose = &pose;
+    foxglove::schemas::LaserScan scan;
+    scan.timestamp.emplace(foxglove::schemas::Timestamp{.sec = uint32_t(msg.utime) / 1000000, .nsec = (uint32_t(msg.utime) % 1000000) * 1000});
+    scan.frame_id = frame_id;
+    scan.pose = foxglove::schemas::Pose{
+        .orientation = foxglove::schemas::Quaternion{.w = 1},
+    };
     scan.start_angle = msg.rad0;
     scan.end_angle = msg.rad0 + msg.radstep * msg.nranges;
     std::vector<double> ranges(msg.nranges);
@@ -123,37 +89,24 @@ int32_t Transcoder::transcode_laser_scan(const std::vector<uint8_t> &in, std::ve
     {
         intensities[i] = msg.intensities[i];
     }
-    scan.ranges = ranges.data();
-    scan.intensities = intensities.data();
-    scan.n_ranges = msg.nranges;
-    scan.n_intensities = msg.nintensities;
-    size_t packed_size = foxglove__laser_scan__get_packed_size(&scan);
-    out->resize(packed_size);
-    foxglove__laser_scan__pack(&scan, out->data());
+    scan.ranges = ranges;
+    scan.intensities = intensities;
+    encode_to_vec(scan, out);
     lcmtypes_laser_t_decode_cleanup(&msg);
     return 0;
 }
-int32_t Transcoder::transcode_gps(const std::vector<uint8_t> &in, std::vector<uint8_t> *out, const char *frame_id) { return -1; }
 int32_t Transcoder::transcode_image(const std::vector<uint8_t> &in, std::vector<uint8_t> *out, const char *frame_id)
 {
     lcmtypes_image_t msg;
     lcmtypes_image_t_decode(in.data(), 0, in.size(), &msg);
-    Foxglove__CompressedImage img;
-    foxglove__compressed_image__init(&img);
-    Google__Protobuf__Timestamp timestamp;
-    google__protobuf__timestamp__init(&timestamp);
-    uint64_t all_nanos = msg.utime * 1000;
-    timestamp.nanos = all_nanos % 1000000000;
-    timestamp.seconds = all_nanos / 1000000000;
-    img.timestamp = &timestamp;
-    img.frame_id = (char *)frame_id;
-    img.data.data = msg.image;
-    img.data.len = msg.size;
-    img.format = (char *)"jpeg";
-    size_t packed_size = foxglove__compressed_image__get_packed_size(&img);
-    out->resize(packed_size);
-    foxglove__compressed_image__pack(&img, out->data());
+    foxglove::schemas::CompressedImage img;
+    uint32_t usec = uint32_t(msg.utime);
+    img.timestamp.emplace(foxglove::schemas::Timestamp{.sec = usec / 1000000, .nsec = (usec % 1000000) * 1000});
+    img.frame_id = frame_id;
+    const std::byte* ptr = (const std::byte*)msg.image;
+    img.data.insert(img.data.end(), ptr, ptr + msg.size);
+    img.format = "jpeg";
+    encode_to_vec(img, out);
     lcmtypes_image_t_decode_cleanup(&msg);
     return 0;
 }
-int32_t Transcoder::transcode_poses_in_frame(const std::vector<uint8_t> &in, std::vector<uint8_t> *out, const char *frame_id) { return -1; }

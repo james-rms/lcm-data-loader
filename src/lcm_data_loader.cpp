@@ -2,32 +2,23 @@
 #include "foxglove_data_loader/data_loader.hpp"
 #include "event_log.hpp"
 #include "transcode.hpp"
-
-#include "descriptors/CompressedImage.h"
-#include "descriptors/LaserScan.h"
-#include "descriptors/LocationFix.h"
-#include "descriptors/PointCloud.h"
-#include "descriptors/PosesInFrame.h"
+#include <foxglove/schemas.hpp>
 
 #include <memory>
 #include <sstream>
 
-constexpr uint16_t CHANNEL_POSE = 0;
 constexpr uint16_t CHANNEL_CAM_THUMB_RFR = 1;
 constexpr uint16_t CHANNEL_CAM_THUMB_RFC = 2;
-constexpr uint16_t CHANNEL_GPS_TO_LOCAL = 3;
-constexpr uint16_t CHANNEL_VELODYNE = 4;
-constexpr uint16_t CHANNEL_BROOM_L = 5;
-constexpr uint16_t CHANNEL_BROOM_R = 6;
-constexpr uint16_t CHANNEL_BROOM_C = 7;
-constexpr uint16_t CHANNEL_BROOM_CL = 8;
-constexpr uint16_t CHANNEL_BROOM_CR = 9;
+constexpr uint16_t CHANNEL_VELODYNE = 3;
+constexpr uint16_t CHANNEL_BROOM_L = 4;
+constexpr uint16_t CHANNEL_BROOM_R = 5;
+constexpr uint16_t CHANNEL_BROOM_C = 6;
+constexpr uint16_t CHANNEL_BROOM_CL = 7;
+constexpr uint16_t CHANNEL_BROOM_CR = 8;
 
-constexpr uint16_t SCHEMA_POSES_IN_FRAME = 1;
-constexpr uint16_t SCHEMA_COMPRESSED_IMAGE = 2;
-constexpr uint16_t SCHEMA_LOCATION_FIX = 3;
-constexpr uint16_t SCHEMA_POINT_CLOUD = 4;
-constexpr uint16_t SCHEMA_LASER_SCAN = 5;
+constexpr uint16_t SCHEMA_COMPRESSED_IMAGE = 1;
+constexpr uint16_t SCHEMA_POINT_CLOUD = 2;
+constexpr uint16_t SCHEMA_LASER_SCAN = 3;
 
 using namespace foxglove_data_loader;
 
@@ -127,61 +118,40 @@ Result<Initialization> LCMDataLoader::initialize()
   }
   const std::string &path = paths[0];
 
+  foxglove::Schema pointcloud_schema = foxglove::schemas::PointCloud::schema();
+  foxglove::Schema laserscan_schema = foxglove::schemas::LaserScan::schema();
+  foxglove::Schema image_schema = foxglove::schemas::CompressedImage::schema();
+
   std::vector<Schema> schemas = {
       Schema{
-          .id = SCHEMA_POSES_IN_FRAME,
-          .name = "foxglove.PosesInFrame",
-          .encoding = "protobuf",
-          .data = BytesView{
-              .ptr = PosesInFrame_bin,
-              .len = PosesInFrame_bin_len,
-          },
-      },
-      Schema{
-          .id = SCHEMA_LOCATION_FIX,
-          .name = "foxglove.LocationFix",
-          .encoding = "protobuf",
-          .data = BytesView{
-              .ptr = LocationFix_bin,
-              .len = LocationFix_bin_len,
-          },
-      },
-      Schema{
           .id = SCHEMA_POINT_CLOUD,
-          .name = "foxglove.PointCloud",
-          .encoding = "protobuf",
+          .name = pointcloud_schema.name,
+          .encoding = pointcloud_schema.encoding,
           .data = BytesView{
-              .ptr = PointCloud_bin,
-              .len = PointCloud_bin_len,
+              .ptr = reinterpret_cast<const uint8_t*>(pointcloud_schema.data),
+              .len = pointcloud_schema.data_len,
           },
       },
       Schema{
           .id = SCHEMA_LASER_SCAN,
-          .name = "foxglove.LaserScan",
-          .encoding = "protobuf",
+          .name = laserscan_schema.name,
+          .encoding = pointcloud_schema.encoding,
           .data = BytesView{
-              .ptr = LaserScan_bin,
-              .len = LaserScan_bin_len,
+              .ptr = reinterpret_cast<const uint8_t*>(laserscan_schema.data),
+              .len = laserscan_schema.data_len,
           },
       },
       Schema{
           .id = SCHEMA_COMPRESSED_IMAGE,
-          .name = "foxglove.CompressedImage",
-          .encoding = "protobuf",
+          .name = image_schema.name,
+          .encoding = image_schema.encoding,
           .data = BytesView{
-              .ptr = CompressedImage_bin,
-              .len = CompressedImage_bin_len,
+              .ptr = reinterpret_cast<const uint8_t*>(image_schema.data),
+              .len = image_schema.data_len,
           },
       },
   };
   std::vector<Channel> channels = {
-      // Channel{
-      //     .id = CHANNEL_POSE,
-      //     .schema_id = SCHEMA_POSES_IN_FRAME,
-      //     .topic_name = "POSE",
-      //     .message_encoding = "protobuf",
-      //     .message_count = 0,
-      // },
       Channel{
           .id = CHANNEL_CAM_THUMB_RFR,
           .schema_id = SCHEMA_COMPRESSED_IMAGE,
@@ -196,13 +166,6 @@ Result<Initialization> LCMDataLoader::initialize()
           .message_encoding = "protobuf",
           .message_count = 0,
       },
-      // Channel{
-      //     .id = CHANNEL_GPS_TO_LOCAL,
-      //     .schema_id = SCHEMA_LOCATION_FIX,
-      //     .topic_name = "GPS_TO_LOCAL",
-      //     .message_encoding = "protobuf",
-      //     .message_count = 0,
-      // },
       Channel{
           .id = CHANNEL_VELODYNE,
           .schema_id = SCHEMA_POINT_CLOUD,
@@ -381,10 +344,6 @@ std::optional<Result<Message>> LCMMessageIterator::next()
           error("failed to parse event at offset", index.offset);
           return Result<Message>{.error = "failed to parse event"};
         }
-        if (index.channel_id == CHANNEL_POSE)
-        {
-          transcoder.transcode_poses_in_frame(current_event.data, &last_serialized_message, "poses");
-        }
         else if (index.channel_id == CHANNEL_BROOM_C)
         {
           transcoder.transcode_laser_scan(current_event.data, &last_serialized_message, "broom_c");
@@ -412,10 +371,6 @@ std::optional<Result<Message>> LCMMessageIterator::next()
         else if (index.channel_id == CHANNEL_CAM_THUMB_RFR)
         {
           transcoder.transcode_image(current_event.data, &last_serialized_message, "cam_thumb_rfr");
-        }
-        else if (index.channel_id == CHANNEL_GPS_TO_LOCAL)
-        {
-          transcoder.transcode_gps(current_event.data, &last_serialized_message, "gps");
         }
         else if (index.channel_id == CHANNEL_VELODYNE)
         {

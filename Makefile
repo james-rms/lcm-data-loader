@@ -1,4 +1,4 @@
-# WASI SDK toolchain configuration. Download a WASI SDK from https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-25.0 and point WASI_SDK_PATH to it.
+# WASI SDK toolchain configuration. Download a WASI SDK from https://github.com/WebAssembly/wasi-sdk/releases/ and point WASI_SDK_PATH to it.
 WASI_SDK_PATH ?= wasi-sdk-25.0-arm64-macos
 CC := $(WASI_SDK_PATH)/bin/clang
 CXX := $(WASI_SDK_PATH)/bin/clang++
@@ -10,12 +10,16 @@ CXXFLAGS :=  -Wall -Werror \
 		--target=wasm32-wasi
 LDFLAGS := --target=wasm32-wasi
 
+sdk_srcs:= \
+	foxglove_data_loader_sdk/src/foxglove/error.cpp \
+	foxglove_data_loader_sdk/src/foxglove/schemas.cpp
+
 srcs:= \
 	src/event_log.cpp \
 	src/transcode.cpp \
 	src/lcm_data_loader.cpp
 
-objects:=\
+lcm_objects:=\
 	build/lcm/eventlog.o \
 	build/lcm/lcmtypes_gps_to_local_t.o \
 	build/lcm/lcmtypes_pose_t.o \
@@ -28,38 +32,24 @@ objects:=\
 	build/lcm/velodyne.o \
 	build/lcm/config_util.o \
 	build/lcm/camtrans.o \
-	build/foxglove/CompressedImage.pb-c.o \
-	build/foxglove/LaserScan.pb-c.o \
-	build/foxglove/LocationFix.pb-c.o \
-	build/foxglove/PackedElementField.pb-c.o \
-	build/foxglove/PointCloud.pb-c.o \
-	build/foxglove/Pose.pb-c.o \
-	build/foxglove/PosesInFrame.pb-c.o \
-	build/foxglove/Quaternion.pb-c.o \
-	build/foxglove/Vector3.pb-c.o \
-    build/google/timestamp.pb-c.o
 
 all: lcm-loader/data-loader.wasm mitdgc-log-sample.lcm
 
 .PHONY: builddir
 builddir:
-	mkdir -p build/foxglove
-	mkdir -p build/google
 	mkdir -p build/lcm
 
-lcm-loader/data-loader.wasm: $(srcs) $(objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm -Llib -lprotobuf-c -Isrc
+lcm-loader/data-loader.wasm: $(srcs) $(lcm_objects) $(sdk_srcs)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm \
+		-Lfoxglove_data_loader_sdk/lib \
+		-Isrc \
+		-Ifoxglove_data_loader_sdk/include \
+		-lfoxglove
 
 mitdgc-log-sample.lcm:
 	curl -o $@ https://grandchallenge.mit.edu/public/mitdgc-log-sample
 
 build/lcm/%.o: src/lcm/%.c | builddir
-	$(CC) -g -c -Wall $(CFLAGS) -o $@ $<  -Isrc
-
-build/foxglove/%.o: src/foxglove/%.c | builddir
-	$(CC) -g -c -Wall $(CFLAGS) -o $@ $<  -Isrc
-
-build/google/%.o: src/google/protobuf/%.c | builddir
 	$(CC) -g -c -Wall $(CFLAGS) -o $@ $<  -Isrc
 
 clean:

@@ -3,9 +3,12 @@
         {
             "name": "Mac",
             "includePath": [
-                "${workspaceFolder}/src/*"
+                "${workspaceFolder}/src/*",
+                "${workspaceFolder}/foxglove_data_loader_sdk/include"
             ],
-            "defines": [],
+            "defines": [
+                "__wasm32__"
+            ],
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c17",
             "cppStandard": "c++17",
